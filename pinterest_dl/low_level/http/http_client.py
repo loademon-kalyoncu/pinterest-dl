@@ -1,3 +1,4 @@
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Iterable, List, Union
@@ -68,12 +69,13 @@ class HttpClient:
                 for chunk in response.iter_content(chunk_size=chunk_size):
                     file.write(chunk)
 
-    def download_streams(self, url: str, output_path: Union[str, Path]) -> None:
+    def download_streams(self, url: str, output_path: Union[str, Path], use_ffmpeg: bool = False) -> None:
         """Downloads a stream from the specified URL and saves it to the output path.
 
         Args:
             url (str): The URL to download the stream from.
             output_path (Union[str, Path]): The file path where the stream will be saved.
+            use_ffmpeg (bool): If True, use ffmpeg for concatenation. If False, use direct binary concatenation.
         """
         # fetch and resolve playlist
         playlist = self.hls_processor.fetch_playlist(url)
@@ -96,7 +98,12 @@ class HttpClient:
                 self.hls_processor.write_segment_file(segment_path, data)
                 segment_paths.append(segment_path)
 
-            # build concat list and combine segments
-            concat_list = temp_dir / "concat_list.txt"
-            self.hls_processor.build_concat_list(segment_paths, concat_list)
-            self.hls_processor.concat_and_remux(concat_list, Path(output_path))
+            # Combine segments with or without ffmpeg
+            if use_ffmpeg:
+                # build concat list and combine segments using ffmpeg
+                concat_list = temp_dir / "concat_list.txt"
+                self.hls_processor.build_concat_list(segment_paths, concat_list)
+                self.hls_processor.concat_and_remux(concat_list, Path(output_path))
+            else:
+                # Direct binary concatenation (no ffmpeg required)
+                self.hls_processor.concat_segments_direct(segment_paths, Path(output_path))
