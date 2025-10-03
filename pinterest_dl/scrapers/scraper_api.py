@@ -104,6 +104,10 @@ class _ScraperAPI(_ScraperBase):
             medias = self._scrape_pins(
                 api, num, min_resolution, delay, bookmarks, caption_from_title=caption_from_title
             )
+        elif api.is_profile:
+            medias = self._scrape_profile(
+                api, num, min_resolution, delay, bookmarks, caption_from_title=caption_from_title
+            )
         else:
             medias = self._scrape_board(
                 api, num, min_resolution, delay, bookmarks, caption_from_title=caption_from_title
@@ -369,6 +373,71 @@ class _ScraperAPI(_ScraperBase):
 
         return images
 
+    def _scrape_profile(
+        self,
+        api: PinterestAPI,
+        num: int,
+        min_resolution: Tuple[int, int],
+        delay: float,
+        bookmarks: BookmarkManager,
+        caption_from_title: bool = False,
+    ) -> List[PinterestMedia]:
+        """Scrape pins from a Pinterest user profile."""
+        medias: List[PinterestMedia] = []
+        username = api.profile_username
+        remains = num
+
+        if self.verbose:
+            print(f"Scraping user profile pins for @{username}...")
+
+        with tqdm(total=num, desc="Scraping Profile", disable=self.verbose) as pbar:
+            while remains > 0:
+                batch_size = min(50, remains)
+                try:
+                    current_img_batch, bookmarks = self._get_profile_images(
+                        api,
+                        username,
+                        batch_size,
+                        bookmarks,
+                        min_resolution,
+                        caption_from_title=caption_from_title,
+                    )
+                except ValueError as e:
+                    print(f"\nError: {e}. Exiting scraping.")
+                    break
+
+                old_count = len(medias)
+                medias.extend(current_img_batch)
+                medias = self._unique_images(medias)
+                new_images_count = len(medias) - old_count
+                remains -= new_images_count
+                pbar.update(new_images_count)
+
+                if "-end-" in bookmarks.get():
+                    break
+
+                time.sleep(delay)
+                try:
+                    remains = self._handle_missing_profile_images(
+                        api,
+                        username,
+                        batch_size,
+                        remains,
+                        bookmarks,
+                        min_resolution,
+                        medias,
+                        pbar,
+                        delay,
+                    )
+                except ValueError as e:
+                    print(f"\nError: {e}. Exiting scraping.")
+                    break
+                except EmptyResponseError as e:
+                    print(f"\nEmptyResponseError: {e}. Exiting scraping.")
+                    break
+
+        return medias
+
     def _scrape_board(
         self,
         api: PinterestAPI,
@@ -473,6 +542,38 @@ class _ScraperAPI(_ScraperBase):
         bookmarks.add_all(response.get_bookmarks())
         return img_batch, bookmarks
 
+    def _get_profile_images(
+        self,
+        api: PinterestAPI,
+        username: str,
+        batch_size: int,
+        bookmarks: BookmarkManager,
+        min_resolution: Tuple[int, int],
+        caption_from_title: bool = False,
+    ) -> Tuple[List[PinterestMedia], BookmarkManager]:
+        """Fetch images from a user profile based on API response."""
+        response = api.get_user_pins(username, batch_size, bookmarks.get())
+
+        # parse response data
+        response_data = response.resource_response.get("data", [])
+        try:
+            img_batch = PinterestMedia.from_responses(
+                response_data, min_resolution, caption_from_title=caption_from_title
+            )
+        except EmptyResponseError as e:
+            print("Empty response received.")
+            return [], bookmarks
+        if self.ensure_alt:
+            batch_count = len(img_batch)
+            img_batch = self._cull_no_alt(img_batch)
+
+            if self.verbose:
+                culled_count = batch_count - len(img_batch)
+                if culled_count:
+                    print(f"Removed {culled_count} images with no alt text from batch.")
+        bookmarks.add_all(response.get_bookmarks())
+        return img_batch, bookmarks
+
     def _search_images(
         self,
         api: PinterestAPI,
@@ -521,6 +622,33 @@ class _ScraperAPI(_ScraperBase):
         while difference > 0 and remains > 0:
             next_response = api.get_search(difference, bookmarks.get())
             next_response_data = next_response.resource_response.get("data", {}).get("results", [])
+            additional_images = PinterestMedia.from_responses(next_response_data, min_resolution)
+            images.extend(additional_images)
+            bookmarks.add_all(next_response.get_bookmarks())
+            remains -= len(additional_images)
+            difference -= len(additional_images)
+            pbar.update(len(additional_images))
+            time.sleep(delay)
+
+        return remains
+
+    def _handle_missing_profile_images(
+        self,
+        api: PinterestAPI,
+        username: str,
+        batch_size: int,
+        remains: int,
+        bookmarks: BookmarkManager,
+        min_resolution: Tuple[int, int],
+        images: List[PinterestMedia],
+        pbar: tqdm,
+        delay: float,
+    ) -> int:
+        """Handle cases where a batch does not return enough images from a user profile."""
+        difference = batch_size - len(images[-batch_size:])
+        while difference > 0 and remains > 0:
+            next_response = api.get_user_pins(username, difference, bookmarks.get())
+            next_response_data = next_response.resource_response.get("data", [])
             additional_images = PinterestMedia.from_responses(next_response_data, min_resolution)
             images.extend(additional_images)
             bookmarks.add_all(next_response.get_bookmarks())
