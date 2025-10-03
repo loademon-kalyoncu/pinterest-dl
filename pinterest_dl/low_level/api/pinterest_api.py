@@ -8,6 +8,7 @@ from pinterest_dl.exceptions import (
     InvalidBoardUrlError,
     InvalidPinterestUrlError,
     InvalidSearchUrlError,
+    InvalidProfileUrlError,
 )
 from pinterest_dl.low_level.api.endpoints import Endpoint
 from pinterest_dl.low_level.api.pinterest_response import PinResponse
@@ -35,6 +36,8 @@ class PinterestAPI:
         """
         self.url = url
         self.timeout = timeout
+
+        # Parse pin ID
         try:
             self.pin_id = self._parse_pin_id(self.url)
         except InvalidPinterestUrlError:
@@ -44,11 +47,21 @@ class PinterestAPI:
             except InvalidSearchUrlError:
                 pass
 
+        # Parse board URL
         try:
             self.username, self.boardname = self._parse_board_url(self.url)
         except InvalidBoardUrlError:
             self.username = None
             self.boardname = None
+
+        # Parse profile URL (if not a board)
+        if not self.boardname:
+            try:
+                self.profile_username = self._parse_profile_url(self.url)
+            except InvalidProfileUrlError:
+                self.profile_username = None
+        else:
+            self.profile_username = None
 
         self.endpoint = Endpoint()
         self.cookies = cookies if cookies else self._get_default_cookies(self.endpoint._BASE)
@@ -61,6 +74,7 @@ class PinterestAPI:
             {"x-pinterest-pws-handler": "www/pin/[id].js"}
         )  # required since 2025-03-07. See https://github.com/sean1832/pinterest-dl/issues/30
         self.is_pin = bool(self.pin_id)
+        self.is_profile = bool(self.profile_username)
 
     def get_related_images(self, num: int, bookmark: List[str]) -> PinResponse:
         if not self.pin_id:
@@ -203,6 +217,45 @@ class PinterestAPI:
             raise requests.JSONDecodeError(f"Failed to decode JSON response: {e}")
         return PinResponse(request_url, json_response)
 
+    def get_user_pins(self, username: str, num: int, bookmark: List[str]) -> PinResponse:
+        """Get pins created by a user.
+
+        Args:
+            username (str): Pinterest username.
+            num (int): Maximum number of pins to retrieve.
+            bookmark (List[str]): Pagination bookmarks.
+
+        Returns:
+            PinResponse: Response containing user's pins.
+        """
+        self._validate_num(num)
+
+        source_url = f"/{username}/_created/"
+
+        endpoint = self.endpoint.GET_USER_ACTIVITY_PINS_RESOURCE
+        options = {
+            "username": username,
+            "page_size": num,
+            "bookmarks": bookmark,
+            "field_set_key": "grid_item",
+            "include_archived": True,
+        }
+
+        try:
+            request_url = RequestBuilder.build_get(endpoint, options, source_url)
+            response_raw = self._session.get(request_url, timeout=self.timeout)
+        except requests.exceptions.RequestException as e:
+            raise requests.RequestException(f"Failed to request user pins: {e}")
+
+        try:
+            json_response = response_raw.json()
+        except requests.exceptions.JSONDecodeError as e:
+            raise RuntimeError(
+                f"Failed to decode JSON response: {e}. Response: {response_raw.text}"
+            )
+
+        return PinResponse(request_url, json_response)
+
     def _validate_num(self, num: int) -> None:
         if num < 1:
             raise ValueError("Number of images must be greater than 0")
@@ -249,3 +302,20 @@ class PinterestAPI:
         if not result:
             raise InvalidBoardUrlError(f"Invalid Pinterest board URL: {url}")
         return result.group(1), result.group(2)
+
+    @staticmethod
+    def _parse_profile_url(url: str) -> str:
+        """Parse Pinterest profile URL to username.
+
+        Args:
+            url (str): Pinterest profile URL. (e.g. "https://www.pinterest.com/username/")
+
+        Returns:
+            result (str): username
+        """
+        result = re.search(
+            r"https://(?:[a-z0-9-]+\.)?pinterest\.com/([A-Za-z0-9_-]+)/?$", url
+        )
+        if not result:
+            raise InvalidProfileUrlError(f"Invalid Pinterest profile URL: {url}")
+        return result.group(1)
