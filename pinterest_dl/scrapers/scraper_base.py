@@ -41,14 +41,8 @@ class _ScraperBase:
             max_retries=3,
             progress_callback=TqdmProgressBarCallback(description="Downloading Media"),
         )
-        if download_streams:
-            try:
-                ensure_executable.ensure_executable("ffmpeg")
-            except ExecutableNotFoundError as e:
-                print(
-                    f"Warning: {e}. Video streams will not be downloaded, falling back to images."
-                )
-                download_streams = False
+        # Note: ffmpeg is no longer required for video downloads
+        # Videos will be concatenated using direct binary concatenation
 
         local_paths = dl.download_concurrent(media, output_dir, download_streams)
 
