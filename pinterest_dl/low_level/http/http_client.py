@@ -69,14 +69,19 @@ class HttpClient:
                 for chunk in response.iter_content(chunk_size=chunk_size):
                     file.write(chunk)
 
-    def download_streams(self, url: str, output_path: Union[str, Path], use_ffmpeg: bool = False) -> None:
+    def download_streams(self, url: str, output_path: Union[str, Path]) -> None:
         """Downloads a stream from the specified URL and saves it to the output path.
+
+        Automatically uses ffmpeg if available for better quality/compatibility,
+        otherwise falls back to direct binary concatenation.
 
         Args:
             url (str): The URL to download the stream from.
             output_path (Union[str, Path]): The file path where the stream will be saved.
-            use_ffmpeg (bool): If True, use ffmpeg for concatenation. If False, use direct binary concatenation.
         """
+        # Check if ffmpeg is available
+        has_ffmpeg = shutil.which("ffmpeg") is not None
+
         # fetch and resolve playlist
         playlist = self.hls_processor.fetch_playlist(url)
         base_uri = playlist.base_uri or url.rsplit("/", 1)[0] + "/"
@@ -98,12 +103,17 @@ class HttpClient:
                 self.hls_processor.write_segment_file(segment_path, data)
                 segment_paths.append(segment_path)
 
-            # Combine segments with or without ffmpeg
-            if use_ffmpeg:
-                # build concat list and combine segments using ffmpeg
+            # Prefer ffmpeg if available, fallback to direct concatenation
+            if has_ffmpeg:
+                # build concat list and combine segments using ffmpeg (better quality)
                 concat_list = temp_dir / "concat_list.txt"
                 self.hls_processor.build_concat_list(segment_paths, concat_list)
-                self.hls_processor.concat_and_remux(concat_list, Path(output_path))
+                try:
+                    self.hls_processor.concat_and_remux(concat_list, Path(output_path))
+                except Exception:
+                    # If ffmpeg fails, fallback to direct concatenation
+                    self.hls_processor.concat_segments_direct(segment_paths, Path(output_path))
             else:
                 # Direct binary concatenation (no ffmpeg required)
+                # Works for Pinterest streams but may have compatibility issues elsewhere
                 self.hls_processor.concat_segments_direct(segment_paths, Path(output_path))
