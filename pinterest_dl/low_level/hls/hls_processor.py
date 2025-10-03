@@ -264,6 +264,19 @@ class HlsProcessor:
                 "concat and re-encode",
             )
 
+    def concat_segments_direct(self, segment_paths: List[Path], output_file: Path) -> None:
+        """Concatenate TS segments directly without ffmpeg (simple binary concatenation).
+
+        Args:
+            segment_paths (List[Path]): The paths to the segment files.
+            output_file (Path): The path to the output file (can be .ts or .mp4).
+        """
+        with output_file.open("wb") as outf:
+            for seg_path in segment_paths:
+                if not seg_path.exists():
+                    raise HlsDownloadError(f"Segment file not found: {seg_path}")
+                outf.write(seg_path.read_bytes())
+
     def _run_cmd(self, cmd: List[str], phase: str) -> None:
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
