@@ -16,3 +16,6 @@ class Endpoint:
     GET_SEARCH_RESOURCE = f"{_BASE}/resource/BaseSearchResource/get/"
     """Get search results. This can be used to search images based text queries."""
 
+    GET_USER_ACTIVITY_PINS_RESOURCE = f"{_BASE}/resource/UserActivityPinsResource/get/"
+    """Get user created pins. This can be used to get all pins created by a user."""
+
