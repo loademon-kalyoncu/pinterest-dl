@@ -69,6 +69,12 @@ class InvalidBoardUrlError(UrlParseError):
         self.url = url
 
 
+class InvalidProfileUrlError(UrlParseError):
+    def __init__(self, url: str):
+        super().__init__(f"Invalid Pinterest profile URL: {url}")
+        self.url = url
+
+
 class PinResponseError(PinterestAPIError):
     """Base exception for Pinterest response errors."""
 
