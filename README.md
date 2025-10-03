@@ -50,11 +50,12 @@ It includes a [CLI](#-cli-usage) for direct usage and a [Python API](#️-python
         - [Scrape Media](#scrape-media)
         - [Search Media](#search-media)
       - [2b. With Browser](#2b-with-browser)
+  - [🔧 Technical Details](#-technical-details)
   - [🤝 Contributing](#-contributing)
   - [📜 License](#-license)
 
 ## 🌟 Features
-- ✅ Scrape media directly from a Pinterest URL.
+- ✅ Scrape media directly from a Pinterest URL (pins, boards, and **user profiles**).
 - ✅ Asynchronously download media from a list of URLs. ([#1](https://github.com/sean1832/pinterest-dl/pull/1))
 - ✅ Save scraped URLs to a JSON file for future access.
 - ✅ Incognito mode to keep your scraping discrete.
@@ -67,7 +68,7 @@ It includes a [CLI](#-cli-usage) for direct usage and a [Python API](#️-python
 - ✅ Search for media on Pinterest using a query. ([#23](https://github.com/sean1832/pinterest-dl/pull/23))
 - ✅ Support multiple urls and queries in a single command.
 - ✅ Support for batch processing of URLs and queries from files.
-- ✅ Download video streams if available.
+- ✅ Download video streams **without requiring ffmpeg** (automatic fallback to binary concatenation).
 
 ## 🚩 Known Issues
 - 🔲 Not yet implement testing.
@@ -75,8 +76,8 @@ It includes a [CLI](#-cli-usage) for direct usage and a [Python API](#️-python
 
 ## 📋 Requirements
 - Python 3.10 or newer
-- (Optional) Chrome or Firefox browser
-- [ffmpeg](https://ffmpeg.org/) added to your PATH for video stream downloading (with `--video` option)
+- (Optional) Chrome or Firefox browser for WebDriver mode
+- (Optional) [ffmpeg](https://ffmpeg.org/) for better video quality - **not required**, videos work without it!
 
 ## 📥 Installation
 
@@ -134,12 +135,15 @@ pinterest-dl login [options]
 
 ---
 
-#### 2. Scrape  
-Download images from a Pin, Board URL, or a list of URLs.
+#### 2. Scrape
+Download images from a Pin, Board, **User Profile**, or a list of URLs.
 
 ```bash
 # Single or multiple URLs:
 pinterest-dl scrape <url1> <url2> …
+
+# User Profile (scrape all pins created by a user):
+pinterest-dl scrape "https://www.pinterest.com/username/" -o downloads -n 100
 
 # From one or more files (one URL per line):
 pinterest-dl scrape -f urls.txt [options]
@@ -149,6 +153,11 @@ pinterest-dl scrape -f urls1.txt -f urls2.txt [options]
 cat urls.txt | pinterest-dl scrape -f - [options]
 ```
 ![scrape](doc/images/pinterest-dl-scrape.gif)
+
+**Supported URL Types:**
+- Pin: `https://www.pinterest.com/pin/123456789/`
+- Board: `https://www.pinterest.com/username/board-name/`
+- **User Profile**: `https://www.pinterest.com/username/` (scrapes all created pins)
 
 | Options                              | Description                                              | Default        |
 | ------------------------------------ | -------------------------------------------------------- | -------------- |
@@ -230,15 +239,15 @@ This example shows how to **scrape** and download images from a Pinterest URL in
 ```python
 from pinterest_dl import PinterestDL
 
-# Initialize and run the Pinterest image downloader with specified settings
+# Scrape from Pin, Board, or User Profile
 images = PinterestDL.with_api(
     timeout=3,  # Timeout in seconds for each request (default: 3)
     verbose=False,  # Enable detailed logging for debugging (default: False)
     ensure_alt=True,  # Ensure every image has alt text (default: False)
 ).scrape_and_download(
-    url="https://www.pinterest.com/pin/1234567",  # Pinterest URL to scrape
+    url="https://www.pinterest.com/username/",  # Pin, Board, or User Profile URL
     output_dir="images/art",  # Directory to save downloaded images
-    num=30,  # Max number of images to download 
+    num=30,  # Max number of images to download
     download_streams=True,  # Download video streams if available (default: False)
     min_resolution=(512, 512),  # Minimum resolution for images (width, height) (default: None)
     cache_path="art.json",  #  Path to cache scraped data as json (default: None)
@@ -246,6 +255,11 @@ images = PinterestDL.with_api(
     delay=0.4,  # Delay between requests (default: 0.2)
 )
 ```
+
+**Supported URLs:**
+- Pin: `https://www.pinterest.com/pin/123456789/`
+- Board: `https://www.pinterest.com/username/board-name/`
+- User Profile: `https://www.pinterest.com/username/` (downloads all created pins)
 
 This example shows how to **search** with query and download images from a Pinterest URL in one step.
 
@@ -422,6 +436,42 @@ PinterestDL.add_captions_to_meta(images=kept_media)
 # Extract `alt` text from media and save it as a text file in the downloaded directory
 PinterestDL.add_captions_to_file(kept_media, output_dir, extension="txt")
 ```
+
+## 🔧 Technical Details
+
+### How Does It Work?
+
+This tool uses **reverse-engineered Pinterest API endpoints** to scrape media. We analyzed Pinterest's web app network traffic to understand how their internal APIs work, then replicated those requests in Python.
+
+**Key Points:**
+- **No official API**: Pinterest doesn't provide a public API for downloading content
+- **Reverse engineering**: We monitor browser network traffic to discover internal endpoints
+- **Bot detection avoidance**: Mimics real browser behavior with proper headers and cookies
+- **Video downloads**: Works **without ffmpeg** using binary concatenation (ffmpeg optional for better quality)
+
+For detailed technical documentation on how we reverse-engineer Pinterest's API and avoid bot detection, see:
+
+📖 **[API Technical Guide](API_TECHNICAL_GUIDE.md)** - Step-by-step explanation of:
+- How Pinterest's internal API works
+- How we avoid CAPTCHA and bot detection
+- HLS video streaming and download process
+- Request/response structure and authentication
+
+### Video Download System
+
+Videos are downloaded from Pinterest's HLS (HTTP Live Streaming) format:
+
+1. **Download M3U8 playlist** - Contains list of video segments
+2. **Download all segments** - Small .ts files (typically 2-10 seconds each)
+3. **Decrypt if needed** - Some segments use AES-128 encryption
+4. **Concatenate segments**:
+   - **With ffmpeg** (if available): Proper MP4 remuxing with metadata
+   - **Without ffmpeg**: Direct binary concatenation (works for most players)
+
+**Why both methods?**
+- ffmpeg provides better compatibility and quality
+- Binary concatenation works without dependencies
+- Tool automatically chooses best available method
 
 ## 🤝 Contributing
 Contributions are welcome! Please check the [Contribution Guidelines](CONTRIBUTING.md) before submitting a pull request.
