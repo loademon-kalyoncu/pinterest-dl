@@ -15,3 +15,4 @@ test_output/
 *.json
 
 test.py
+test_downloads/
